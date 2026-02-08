@@ -1,0 +1,211 @@
+---
+title: "SPS_Data607_Week2_2A - David Chen"
+format: html
+editor: visual
+---
+
+## SQL and R – Movie Ratings
+
+Collect simple movie-rating data, store it in a SQL database, and analyze it in R.
+
+### Implementation Notes:
+PostgreSQL is the recommended (and supported) relational database for this assignment.
+If you are unable to install and configure PostgreSQL in your environment, you may find SQLite easier to use.  
+Students experienced with relational databases may use any local or cloud-based database for their assignment.
+NEVER include passwords in your code.  
+For this assignment, the ability to reproduce your work in my environment is not required, but you need to provide all of the necessary code, include the code used to create and populate tables.
+
+### Task Description
+
+Select six recent popular movies (or television episodes or books or songs or ...)
+Ask at least five people to rate each movie they have seen on a 1–5 scale.
+Store the collected ratings in a SQL database of your choice.
+Load the data from SQL into R as a dataframe.
+
+### Approach
+I need to demonstrate how to use an SQL connector in R and execute SQL code within R to read and write data in a database. It also shows how SQL can be used to perform queries. So I will have to know the libraries for connector and how to run SQL in R. 
+
+### Installation
+Created a new Ubuntu 25.10 CT in PVE node.
+```{bash}
+#| eval: false
+apt update && apt upgrade
+apt install postgresql
+sudo -u postgres psql
+```
+#### Adding login password
+
+ALTER USER postgres PASSWORD 'YourStrongPassword';
+
+
+```{bah}
+#| eval: false
+nano /etc/postgresql/*/main/postgresql.conf
+nano /etc/postgresql/*/main/pg_hba.conf
+ufw allow 5432/tcp
+```
+update these 2 files and open firewall to allow pgadmin4 remote access to this CT.
+
+also allowing password to login database.
+
+Now ask ChatGPT to create this simple database based on the requirements.
+
+
+```{sql}
+--| eval: false
+CREATE TABLE movies (
+    movie_id SERIAL PRIMARY KEY,
+    title VARCHAR(100) NOT NULL
+);
+CREATE TABLE ratings (
+    rating_id SERIAL PRIMARY KEY,
+    movie_id INT REFERENCES movies(movie_id),
+    rater_name VARCHAR(50) NOT NULL,
+    rating INT CHECK (rating BETWEEN 1 AND 5)
+);
+INSERT INTO movies (title) VALUES
+('Avatar: The Way of Water'),
+('Oppenheimer'),
+('Barbie'),
+('Stranger Things S5'),
+('The Marvels'),
+('Killers of the Flower Moon');
+INSERT INTO ratings (movie_id, rater_name, rating) VALUES
+(1, 'Alice', 5),
+(1, 'Bob', 4),
+(1, 'Charlie', 3),
+(1, 'David', 4),
+(1, 'Eve', 5),
+
+(2, 'Alice', 4),
+(2, 'Bob', 5),
+(2, 'Charlie', 4),
+(2, 'David', 3),
+(2, 'Eve', 4),
+
+(3, 'Alice', 3),
+(3, 'Bob', 4),
+(3, 'Charlie', 5),
+(3, 'David', 3),
+(3, 'Eve', 4),
+
+(4, 'Alice', 5),
+(4, 'Bob', 5),
+(4, 'Charlie', 4),
+(4, 'David', 4),
+(4, 'Eve', 5),
+
+(5, 'Alice', 3),
+(5, 'Bob', 4),
+(5, 'Charlie', 3),
+(5, 'David', 4),
+(5, 'Eve', 3),
+
+(6, 'Alice', 4),
+(6, 'Bob', 4),
+(6, 'Charlie', 5),
+(6, 'David', 5),
+(6, 'Eve', 4);
+```
+
+After this step , manually delete some values to null
+
+### Swtich to RStudio and connect to PostgreSQL
+
+```{r}
+#install.packages("DBI")       # Generic database interface
+#install.packages("RPostgres") # PostgreSQL driver
+```
+```{r}
+library(DBI)
+library(RPostgres)
+```
+
+```{r}
+con <- dbConnect(
+  RPostgres::Postgres(),
+  dbname = "chatgpt_c",    # your database name
+  host = "192.168.100.61",          # or server IP
+  port = 5432,                 # default PostgreSQL port
+  user = "postgres",           # your DB username
+  password = "ubuntu"    # your DB password
+)
+```
+
+```{r}
+dbListTables(con)
+```
+```{r}
+query <- "SELECT m.title, r.rater_name, r.rating
+          FROM movies m
+          JOIN ratings r ON m.movie_id = r.movie_id
+          ORDER BY m.movie_id, r.rater_name;"
+
+data <- dbGetQuery(con, query)
+print(data)
+```
+
+#### Option1: Replacing NA with "0"
+```{r}
+library(dplyr)
+library(ggplot2)
+data <- data%>%
+  mutate(rating = ifelse(is.na(rating), 0, rating))
+print(data)
+```
+```{r}
+data %>%
+  group_by(rater_name) %>%
+  summarise(ratings_count = n())
+```
+```{r}
+data %>%
+  group_by(title) %>%
+  summarise(ratings_count = n())
+```
+
+#### Average rating per movie
+```{r}
+data %>%
+  group_by(title) %>%
+  summarise(avg_rating = round(mean(rating, na.rm = TRUE), 2))
+```
+```{r}
+avg_ratings <- data %>%
+  group_by(title) %>%
+  summarise(avg_rating = round(mean(rating, na.rm = TRUE), 2))
+  ggplot(avg_ratings, aes(x = reorder(title, -avg_rating), y = avg_rating)) +
+  geom_col(fill = "steelblue") +          # create the bars
+  geom_text(aes(label = avg_rating), vjust = -0.5) +  # show value on top
+  labs(title = "Average Ratings per Movie",
+       x = "Movie",
+       y = "Average Rating") +
+  ylim(0, 5) +                            # rating scale 1-5
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+#### Average rating per user
+
+```{r}
+
+data %>%
+  group_by(rater_name) %>%
+  summarise(avg_rating = round(mean(rating, na.rm = TRUE), 2))
+
+```
+```{r}
+avg_ratings <- data %>%
+  group_by(rater_name) %>%
+  summarise(avg_rating = round(mean(rating, na.rm = TRUE), 2))
+  ggplot(avg_ratings, aes(x = reorder(rater_name, -avg_rating), y = avg_rating)) +
+  geom_col(fill = "steelblue") +          # create the bars
+  geom_text(aes(label = avg_rating), vjust = -0.5) +  # show value on top
+  labs(title = "Average Ratings per User",
+       x = "Name",
+       y = "Average Rating") +
+  ylim(0, 5) +                            # rating scale 1-5
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
